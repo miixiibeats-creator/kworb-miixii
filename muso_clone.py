@@ -2,11 +2,11 @@ import streamlit as st
 import pandas as pd
 import requests
 import plotly.express as px
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 
 # --- 1. CONFIGURATION ---
-st.set_page_config(page_title="KWORB by Miixii", layout="wide")
+st.set_page_config(page_title="KWORB by Miixii", layout="wide", page_icon="🎹")
 
 st.markdown("""
     <style>
@@ -65,7 +65,12 @@ def fetch_kworb_data(artist_info, my_tracks_for_this_artist):
         return pd.DataFrame(results) if results else None
     except: return None
 
-# --- 3. SIDEBAR ---
+# --- 3. LOGIQUE DE CHARGEMENT (PRÉ-DASHBOARD) ---
+# On prépare les emplacements vides en haut de la page
+progress_placeholder = st.empty()
+status_placeholder = st.empty()
+
+# --- 4. SIDEBAR ---
 with st.sidebar:
     st.header("📖 GUIDE D'UTILISATION")
     st.info("""
@@ -75,55 +80,72 @@ with st.sidebar:
     4. Importe le fichier ci-dessous.
     """)
     st.divider()
+    
     st.header("📂 IMPORTATION")
     uploaded_file = st.file_uploader("Upload ton fichier CSV", type="csv")
     
-    # --- AJOUT DES CRÉDITS ---
+    if uploaded_file:
+        try:
+            df_liked = pd.read_csv(uploaded_file, encoding='utf-8')
+        except UnicodeDecodeError:
+            df_liked = pd.read_csv(uploaded_file, encoding='latin-1')
+
+        df_liked = df_liked.rename(columns={
+            "Track Name": "Track", "Nom du titre": "Track",
+            "Artist Name(s)": "Artists_Names", "Nom(s) de l'artiste": "Artists_Names",
+            "Artist URI(s)": "Artists_URIs", "URI(s) de l'artiste": "Artists_URIs"
+        })
+        
+        artist_to_tracks = {}
+        if "Track" in df_liked.columns:
+            for _, row in df_liked.iterrows():
+                names = [n.strip() for n in str(row['Artists_Names']).split(',')]
+                uris = [u.strip() for u in str(row['Artists_URIs']).split(',')] if "Artists_URIs" in df_liked.columns else [f"none:{n}" for n in names]
+                t_clean = clean_strict(str(row['Track']))
+                for n, u in zip(names, uris):
+                    a_id = u.split(':')[-1].strip()
+                    a_key = (n, a_id)
+                    if a_key not in artist_to_tracks: artist_to_tracks[a_key] = set()
+                    artist_to_tracks[a_key].add(t_clean)
+
+            if st.button("🚀 LANCER L'ANALYSE"):
+                all_res = []
+                total_artists = len(artist_to_tracks)
+                
+                # Utilisation des emplacements en haut de page
+                bar = progress_placeholder.progress(0)
+                txt = status_placeholder.empty()
+                
+                with ThreadPoolExecutor(max_workers=3) as ex:
+                    futures = {ex.submit(fetch_kworb_data, art, tracks): art for art, tracks in artist_to_tracks.items()}
+                    completed = 0
+                    for f in as_completed(futures):
+                        completed += 1
+                        percent = int((completed / total_artists) * 100)
+                        bar.progress(percent)
+                        txt.text(f"Récupération : {percent}% (Artiste {completed}/{total_artists})")
+                        
+                        if f.result() is not None:
+                            all_res.append(f.result())
+                
+                txt.success("✅ Analyse terminée !")
+                if all_res:
+                    st.session_state['data'] = pd.concat(all_res).drop_duplicates(subset=['Track', 'Artist'])
+                    # On nettoie la barre avant de refresh
+                    bar.empty()
+                    txt.empty()
+                    st.rerun()
+
     st.markdown("---")
     st.caption("🚀 Developed by Miixii")
     st.caption("📊 Data sourced from Kworb.net")
     st.caption("© 2026 Miixii Production")
 
-# --- 4. DASHBOARD ---
+# --- 5. DASHBOARD ---
 st.title("📊 KWORB by Miixii")
 
 if 'data' not in st.session_state:
     st.session_state['data'] = None
-
-if uploaded_file:
-    try:
-        df_liked = pd.read_csv(uploaded_file, encoding='utf-8')
-    except UnicodeDecodeError:
-        df_liked = pd.read_csv(uploaded_file, encoding='latin-1')
-
-    df_liked = df_liked.rename(columns={
-        "Track Name": "Track", "Nom du titre": "Track",
-        "Artist Name(s)": "Artists_Names", "Nom(s) de l'artiste": "Artists_Names",
-        "Artist URI(s)": "Artists_URIs", "URI(s) de l'artiste": "Artists_URIs"
-    })
-    
-    artist_to_tracks = {}
-    if "Track" in df_liked.columns:
-        for _, row in df_liked.iterrows():
-            names = [n.strip() for n in str(row['Artists_Names']).split(',')]
-            uris = [u.strip() for u in str(row['Artists_URIs']).split(',')] if "Artists_URIs" in df_liked.columns else [f"none:{n}" for n in names]
-            t_clean = clean_strict(str(row['Track']))
-            for n, u in zip(names, uris):
-                a_id = u.split(':')[-1].strip()
-                a_key = (n, a_id)
-                if a_key not in artist_to_tracks: artist_to_tracks[a_key] = set()
-                artist_to_tracks[a_key].add(t_clean)
-
-        if st.sidebar.button("🚀 LANCER L'ANALYSE"):
-            all_res = []
-            with st.status("🔍 Récupération des données..."):
-                with ThreadPoolExecutor(max_workers=5) as ex:
-                    futures = [ex.submit(fetch_kworb_data, art, tracks) for art, tracks in artist_to_tracks.items()]
-                    for f in futures:
-                        if f.result() is not None: all_res.append(f.result())
-            if all_res:
-                st.session_state['data'] = pd.concat(all_res).drop_duplicates(subset=['Track', 'Artist'])
-                st.rerun()
 
 if st.session_state['data'] is not None:
     # --- SECTION FILTRES ---
@@ -140,7 +162,6 @@ if st.session_state['data'] is not None:
         max_s = int(df_filtered['Streams'].max()) if not df_filtered.empty else 1000
         min_s = st.slider("Streams Minimum", 0, max_s, 0)
 
-    # Application des filtres
     if search_query:
         df_filtered = df_filtered[df_filtered['Track'].str.contains(search_query, case=False, na=False)]
     if sel_artist != "Tous":
