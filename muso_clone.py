@@ -11,45 +11,31 @@ from datetime import datetime, timedelta
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="KWORB by Miixii", layout="wide", page_icon="🎹")
 
-# --- DESIGN MODERNE ---
+# --- DESIGN ---
 st.markdown("""
     <style>
     .main { background-color: #0c0e12; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-    @media (max-width: 768px) { [data-testid="stMetric"] { min-width: 100% !important; } }
-    [data-testid="stMetricValue"] { font-size: 32px; color: #1DB954; font-weight: 800; margin-top: 10px !important; }
-    [data-testid="stMetricLabel"] { font-size: 14px; color: #a0a0a0; text-transform: uppercase; letter-spacing: 1px; }
+    [data-testid="stMetricValue"] { font-size: 32px; color: #1DB954; font-weight: 800; }
     div.stMetric > div:first-child {
         background-color: #161a21; border-radius: 15px; padding: 25px 20px; 
-        border: 1px solid #2a2f3a; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        margin-bottom: 10px; display: flex; flex-direction: column; min-height: 180px !important; justify-content: center;
+        border: 1px solid #2a2f3a; min-height: 180px !important;
     }
-    .stTextInput>div>div>input, .stNumberInput>div>div>input, .stSelectbox div[data-baseweb="select"] > div {
-        border-radius: 10px !important; background-color: #161a21 !important; border: 1px solid #2a2f3a !important; color: white !important; height: 45px;
-    }
-    div[data-baseweb="select"] { background-color: #161a21 !important; border-radius: 10px !important; }
     div.stButton > button { 
         width: 100%; background-color: #1DB954; color: white; border-radius: 50px;
-        font-weight: 800; text-transform: uppercase; letter-spacing: 1px; border: none; padding: 10px 20px; transition: all 0.3s ease;
+        font-weight: 800; text-transform: uppercase; border: none; padding: 10px 20px;
     }
-    div.stButton > button:hover { background-color: #1ed760; transform: scale(1.02); }
-    [data-testid="stSidebar"] { background-color: #11141a; border-right: 1px solid #2a2f3a; }
-    [data-testid="stSidebar"] .stMarkdown h2 { color: #1DB954; }
-    a { color: #1DB954; text-decoration: none; font-weight: bold; }
-    h1, h2, h3 { font-weight: 800; color: white; }
-    h4 { color: #a0a0a0; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;}
-    .stDataFrame, .stTable { border-radius: 15px; overflow: hidden; border: 1px solid #2a2f3a; }
-    .stTabs [data-baseweb="tab-list"] { gap: 24px; }
-    .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: transparent; border-radius: 4px 4px 0px 0px; color: #a0a0a0; font-weight: 700; }
-    .stTabs [aria-selected="true"] { color: #1DB954 !important; border-bottom-color: #1DB954 !important; }
+    .podium-container { display: flex; justify-content: center; align-items: flex-end; gap: 15px; margin: 40px auto; }
+    .podium-block { background-color: #161a21; border-radius: 15px; padding: 20px; text-align: center; border: 1px solid #2a2f3a; flex: 1; }
+    .block-1 { min-height: 180px; order: 2; border-bottom: 4px solid #FFD700; } 
+    .block-2 { min-height: 150px; order: 1; border-bottom: 4px solid #C0C0C0; } 
+    .block-3 { min-height: 130px; order: 3; border-bottom: 4px solid #CD7F32; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. FONCTIONS TECHNIQUES ---
+# --- 2. FONCTIONS ---
 def clean_strict(text):
     if not isinstance(text, str): return ""
-    text = re.sub(r'\(.*?\)|\[.*?\]', '', text)
-    text = text.split(' - ')[0]
-    text = text.replace("’", "'").replace("œ", "oe")
+    text = re.sub(r'\(.*?\)|\[.*?\]', '', text).split(' - ')[0]
     return re.sub(r'[^a-z0-9]', '', text.lower().strip())
 
 def clean_kworb_number(val, is_daily=False):
@@ -62,271 +48,87 @@ def clean_kworb_number(val, is_daily=False):
 def format_space(n):
     return f"{int(n):,}".replace(',', ' ')
 
-def safe_parse_date(date_str):
-    try:
-        return datetime.strptime(date_str, "%Y-%m-%d")
-    except ValueError:
-        if "-02-29" in date_str:
-            new_date = date_str.replace("-02-29", "-02-28")
-            return datetime.strptime(new_date, "%Y-%m-%d")
-        return datetime.now()
-
 @st.cache_data(show_spinner=False, ttl=86400)
 def fetch_kworb_data(artist_info, my_tracks_for_this_artist):
     name, a_id = artist_info
     url = f"https://kworb.net/spotify/artist/{a_id}_songs.html"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
         response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code == 429: return "RATE_LIMIT"
-        response.encoding = 'utf-8' 
         tables = pd.read_html(io.StringIO(response.text))
-        df_k = pd.DataFrame()
-        for t in tables:
-            if any("Song" in str(c) or "Track" in str(c) for c in t.columns):
-                df_k = t
-                break
-        if df_k.empty: return None
-        col_t = [c for c in df_k.columns if "Song" in str(c) or "Track" in str(c)][0]
-        col_s = [c for c in df_k.columns if "Streams" in str(c)][0]
-        col_d = [c for c in df_k.columns if "Daily" in str(c)][0]
+        df_k = next(t for t in tables if any("Song" in str(c) or "Track" in str(c) for c in t.columns))
+        col_t, col_s, col_d = [c for c in df_k.columns if "Song" in str(c) or "Track" in str(c)][0], [c for c in df_k.columns if "Streams" in str(c)][0], [c for c in df_k.columns if "Daily" in str(c)][0]
         results = []
-        my_tracks_list = list(my_tracks_for_this_artist)
         for _, row in df_k.iterrows():
-            title_raw = str(row[col_t])
-            title_clean = clean_strict(title_raw)
-            if any(title_clean in mt or mt in title_clean for mt in my_tracks_list):
-                results.append({
-                    'Track': title_raw, 'Streams': clean_kworb_number(row[col_s]),
-                    'Daily': clean_kworb_number(row[col_d], is_daily=True),
-                    'Artist': name, 'Date_Fetch': datetime.now().strftime("%Y-%m-%d")
-                })
-        return pd.DataFrame(results) if results else None
+            t_clean = clean_strict(str(row[col_t]))
+            if any(t_clean in mt or mt in t_clean for mt in my_tracks_for_this_artist):
+                results.append({'Track': str(row[col_t]), 'Streams': clean_kworb_number(row[col_s]), 'Daily': clean_kworb_number(row[col_d], True), 'Artist': name, 'Date_Fetch': datetime.now().strftime("%Y-%m-%d")})
+        return pd.DataFrame(results)
     except: return None
 
-# --- 3. UI PLACEHOLDERS ---
-progress_placeholder = st.empty()
-status_placeholder = st.empty()
-
-# --- 4. SIDEBAR ---
+# --- 3. SIDEBAR ---
 with st.sidebar:
-    st.header("📖 GUIDE D'UTILISATION")
-    st.info("1. Rends-toi sur [Exportify](https://exportify.app).\n2. Connecte Spotify.\n3. Exporte en CSV.\n4. Importe ici.")
-    st.divider()
     st.header("📂 IMPORTATION")
-    uploaded_files = st.file_uploader("Upload ton fichier CSV", type="csv", accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Upload CSV", type="csv", accept_multiple_files=True)
+    artist_to_tracks = {}
+    history = []
     
     if uploaded_files:
-        artist_to_tracks = {}
-        current_upload_history = []
-        for uploaded_file in uploaded_files:
-            fname = uploaded_file.name
-            date_found = re.findall(r'\d{4}-\d{2}-\d{2}', fname)
-            file_date = date_found[-1] if date_found else datetime.now().strftime("%Y-%m-%d")
-            
+        for f in uploaded_files:
             try:
-                try: df_temp = pd.read_csv(uploaded_file, encoding='utf-8')
-                except: df_temp = pd.read_csv(uploaded_file, encoding='latin-1')
-                
-                df_temp['Date_Fetch'] = file_date
-                
-                if 'Track' in df_temp.columns and 'Streams' in df_temp.columns and ('Daily' in df_temp.columns or 'Date_Fetch' in df_temp.columns):
-                    current_upload_history.append(df_temp)
-                else:
-                    df_temp = df_temp.rename(columns={
-                        "Track Name": "Track", "Nom du titre": "Track",
-                        "Artist Name(s)": "Artists_Names", "Nom(s) de l'artiste": "Artists_Names",
-                        "Artist URI(s)": "Artists_URIs", "URI(s) de l'artiste": "Artists_URIs"
-                    })
-                    if "Track" in df_temp.columns:
-                        for _, row in df_temp.iterrows():
-                            names = [n.strip() for n in str(row['Artists_Names']).split(',')]
-                            uris = [u.strip() for u in str(row['Artists_URIs']).split(',')] if "Artists_URIs" in df_temp.columns else [f"none:{n}" for n in names]
-                            t_clean = clean_strict(str(row['Track']))
-                            for n, u in zip(names, uris):
-                                a_id = u.split(':')[-1].strip()
-                                a_key = (n, a_id)
-                                if a_key not in artist_to_tracks: artist_to_tracks[a_key] = set()
-                                artist_to_tracks[a_key].add(t_clean)
-            except Exception as e:
-                st.error(f"Erreur fichier {fname}: {e}")
+                df_temp = pd.read_csv(f, encoding='utf-8')
+            except:
+                df_temp = pd.read_csv(f, encoding='latin-1')
+            
+            if 'Date_Fetch' in df_temp.columns: # Archive
+                for d in df_temp['Date_Fetch'].unique():
+                    history.append(df_temp[df_temp['Date_Fetch'] == d].copy())
+            else: # Exportify
+                df_temp = df_temp.rename(columns={"Track Name":"Track","Artist Name(s)":"Artists_Names","Artist URI(s)":"Artists_URIs"})
+                for _, row in df_temp.iterrows():
+                    names, uris = str(row['Artists_Names']).split(','), str(row['Artists_URIs']).split(',')
+                    t_clean = clean_strict(str(row['Track']))
+                    for n, u in zip(names, uris):
+                        a_key = (n.strip(), u.split(':')[-1].strip())
+                        if a_key not in artist_to_tracks: artist_to_tracks[a_key] = set()
+                        artist_to_tracks[a_key].add(t_clean)
         
-        st.session_state['history'] = current_upload_history
-
+        st.session_state['history'] = history
         if artist_to_tracks and st.button("🚀 LANCER L'ANALYSE"):
             all_res = []
-            total_artists = len(artist_to_tracks)
-            bar = progress_placeholder.progress(0)
-            txt = status_placeholder.empty()
-            with ThreadPoolExecutor(max_workers=3) as ex:
-                futures = {ex.submit(fetch_kworb_data, art, tuple(tracks)): art for art, tracks in artist_to_tracks.items()}
-                completed = 0
-                for f in as_completed(futures):
-                    completed += 1
-                    percent = int((completed / total_artists) * 100)
-                    bar.progress(percent)
-                    txt.text(f"Récupération : {percent}% (Artiste {completed}/{total_artists})")
+            bar = st.progress(0)
+            with ThreadPoolExecutor(max_workers=5) as ex:
+                futures = {ex.submit(fetch_kworb_data, k, tuple(v)): k for k, v in artist_to_tracks.items()}
+                for i, f in enumerate(as_completed(futures)):
+                    bar.progress(int(((i+1)/len(artist_to_tracks))*100))
                     res = f.result()
-                    if res is not None and not isinstance(res, str): all_res.append(res)
+                    if res is not None: all_res.append(res)
             if all_res:
                 st.session_state['data'] = pd.concat(all_res).drop_duplicates(subset=['Track', 'Artist'])
-                st.session_state['data']['Date_Fetch'] = datetime.now().strftime("%Y-%m-%d")
                 st.session_state['history'].append(st.session_state['data'])
-                bar.empty()
-                txt.empty()
                 st.rerun()
+        elif history: st.session_state['data'] = history[-1]
 
-    st.divider()
-    st.caption("🚀 Developed by Miixii | © 2026")
-
-# --- 5. DASHBOARD ---
-tab1, tab2 = st.tabs(["📊 Tableau de Bord", "📈 Suivi de Progression"])
-
+# --- 4. DASHBOARD ---
+tab1, tab2 = st.tabs(["📊 Tableau de Bord", "📈 Suivi"])
 with tab1:
-    st.title("📊 KWORB by Miixii")
-    if 'data' in st.session_state and st.session_state['data'] is not None:
-        df_filtered = st.session_state['data'].copy()
-        
-        f1, f2, f3 = st.columns([1, 1, 1])
-        with f1: search = st.text_input("Rechercher un Titre", key="s_main")
-        with f2:
-            alist = sorted(df_filtered['Artist'].unique().tolist())
-            sel_art = st.multiselect("Filtrer par Artiste(s)", options=alist, key="a_main")
-        with f3: min_s = st.number_input("Streams Minimum", min_value=0, step=100000, key="m_main")
-        
-        def clear_filters():
-            st.session_state["s_main"] = ""
-            st.session_state["a_main"] = []
-            st.session_state["m_main"] = 0
-
-        if search or sel_art or min_s > 0:
-            st.button("🔄 Réinitialiser les filtres", on_click=clear_filters)
-
-        if search: df_filtered = df_filtered[df_filtered['Track'].str.contains(search, case=False)]
-        if sel_art: df_filtered = df_filtered[df_filtered['Artist'].isin(sel_art)]
-        df_filtered = df_filtered[df_filtered['Streams'] >= min_s]
-
-        daily_sum = df_filtered['Daily'].sum()
-        monthly_proj = daily_sum * 30.5
-        est_royalties = monthly_proj * 0.0035
-
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Streams Totaux", format_space(df_filtered['Streams'].sum()), help="Somme cumulée de tous les streams détectés sur Kworb.")
-        k2.metric("Streams (24h)", format_space(daily_sum), help="Nombre total de streams générés sur les dernières 24h.")
-        k3.metric("Projection 30j", format_space(monthly_proj), delta=f"{format_space(est_royalties)} €/mois est.", help="Estimation mensuelle basée sur le Daily actuel.")
-        k4.metric("Titres Trouvés", len(df_filtered), help="Nombre de titres identifiés.")
-
+    if 'data' in st.session_state:
+        df = st.session_state['data']
+        daily = df['Daily'].sum()
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Streams Totaux", format_space(df['Streams'].sum()))
+        k2.metric("Streams (24h)", format_space(daily))
+        k3.metric("Titres", len(df))
         st.divider()
-        col_g, col_d = st.columns([1.2, 0.8])
-        with col_g:
-            st.markdown("#### 🔥 Top 15 - Performance 24h")
-            top_15 = df_filtered.sort_values('Daily', ascending=False).head(15)
-            fig = px.bar(top_15, x='Daily', y='Track', color='Daily', orientation='h', template="plotly_dark", color_continuous_scale='Greens', text=top_15['Daily'].apply(format_space))
-            fig.update_traces(hovertemplate="<b>%{y}</b><br>Streams : %{x:,}<extra></extra>")
-            fig.update_layout(yaxis={'categoryorder':'total ascending'}, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-            st.plotly_chart(fig, use_container_width=True)
-        with col_d:
-            with st.expander("🔍 Focus Parts Artistes", expanded=True):
-                art_sums = df_filtered.groupby('Artist')['Streams'].sum().reset_index()
-                fig_pie = px.pie(art_sums, values='Streams', names='Artist', hole=0.5, template="plotly_dark")
-                fig_pie.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-                st.plotly_chart(fig_pie, use_container_width=True)
-
+        st.markdown("### 🏆 Podium")
+        top3 = df.sort_values('Daily', ascending=False).head(3)
+        st.write(top3[['Track', 'Artist', 'Daily']])
         st.divider()
-        d_c1, d_c2 = st.columns([0.8, 0.2])
-        d_c1.markdown("#### 📋 Détails des Productions")
-        csv_data = df_filtered.to_csv(index=False).encode('utf-8')
-        d_c2.download_button("📥 Export CSV", data=csv_data, file_name=f"stats_kworb_miixii_{datetime.now().strftime('%Y-%m-%d')}.csv")
-        
-        sort_choice = st.radio("Trier par :", ["Top Daily (24h)", "Top Streams (Total)"], horizontal=True)
-        sort_col = 'Daily' if "Daily" in sort_choice else 'Streams'
-        df_table = df_filtered.sort_values(sort_col, ascending=False).copy()
-        df_table['Streams Totaux'] = df_table['Streams'].apply(format_space)
-        df_table['Daily (24h)'] = df_table['Daily'].apply(format_space)
-        st.dataframe(df_table[['Track', 'Artist', 'Streams Totaux', 'Daily (24h)']], use_container_width=True, hide_index=True)
-
-        st.divider()
-        st.markdown("#### 🏆 Classement Top Artistes")
-        art_stats = df_filtered.groupby('Artist').agg({'Streams': 'sum', 'Daily': 'sum', 'Track': 'count'}).reset_index().sort_values('Streams', ascending=False)
-        art_stats.insert(0, 'Rang', [f"#{i+1}" for i in range(len(art_stats))])
-        art_stats['Streams Totaux'] = art_stats['Streams'].apply(format_space)
-        art_stats['Daily Global'] = art_stats['Daily'].apply(format_space)
-        st.table(art_stats[['Rang', 'Artist', 'Streams Totaux', 'Daily Global', 'Track']].rename(columns={'Artist': 'Artiste', 'Track': 'Nb Titres'}))
-    else:
-        st.info("👈 Importe ton CSV pour commencer.")
+        st.dataframe(df[['Track', 'Artist', 'Streams', 'Daily']].sort_values('Daily', ascending=False), use_container_width=True)
 
 with tab2:
-    st.title("📈 Suivi de Progression")
-    st.info("""
-    **💡 Comment utiliser le suivi de progression ?**
-    1. **Importez plusieurs fichiers :** Glissez simultanément vos anciens exports CSV (ceux avec une date dans le nom) dans la barre latérale.
-    2. **Comparez :** L'outil compare automatiquement le fichier le plus ancien avec le plus récent pour calculer la croissance.
-    3. **Archivez :** Utilisez le bouton **📦 Sauvegarder l'Historique Global** ci-dessous pour fusionner toutes vos données en un seul fichier. La prochaine fois, vous n'aurez qu'à importer ce fichier unique !
-    """)
-    
     if 'history' in st.session_state and len(st.session_state['history']) > 1:
-        hist_sorted = sorted(st.session_state['history'], key=lambda x: safe_parse_date(x['Date_Fetch'].iloc[0]))
-        df_old, df_new = hist_sorted[0], hist_sorted[-1]
-        
-        try:
-            d1 = safe_parse_date(df_old['Date_Fetch'].iloc[0])
-            d2 = safe_parse_date(df_new['Date_Fetch'].iloc[0])
-            days_diff = max((d2 - d1).days, 1)
-            
-            diff_total = df_new['Streams'].sum() - df_old['Streams'].sum()
-            growth_per_day = diff_total / days_diff
-            
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Gain de Streams Global", format_space(diff_total), delta=f"+{format_space(diff_total)}", help="Croissance totale sur la période.")
-            m2.metric("Période d'Analyse", f"{days_diff} Jours", f"Du {d1.strftime('%Y-%m-%d')} au {d2.strftime('%Y-%m-%d')}", delta_color="off", help="Intervalle entre le premier et dernier import.")
-            m3.metric("Vitesse de Croissance", f"~{format_space(growth_per_day)}", "Streams / jour", help="Gain moyen quotidien.")
-
-            st.divider()
-            all_history_df = pd.concat(st.session_state['history'])
-            csv_history = all_history_df.to_csv(index=False).encode('utf-8')
-            st.download_button(label="📦 Sauvegarder l'Historique Global (Fusionné)", data=csv_history, file_name=f"archive_complete_{datetime.now().strftime('%Y-%m-%d')}.csv", mime='text/csv')
-            
-            st.divider()
-            df_comp = df_new[['Track', 'Artist', 'Streams']].merge(df_old[['Track', 'Streams']], on='Track', suffixes=('_Nouveau', '_Ancien'))
-            df_comp['Evolution'] = df_comp['Streams_Nouveau'] - df_comp['Streams_Ancien']
-            
-            top_grower = df_comp.sort_values('Evolution', ascending=False).iloc[0]
-            art_growth = df_comp.groupby('Artist')['Evolution'].sum().sort_values(ascending=False)
-            
-            s1, s2 = st.columns(2)
-            s1.metric("🏆 Meilleure progression (Titre)", top_grower['Track'], f"+{format_space(top_grower['Evolution'])} streams")
-            s2.metric("👑 Artiste en croissance", art_growth.index[0], f"+{format_space(art_growth.iloc[0])} streams")
-
-            st.divider()
-            st.markdown("#### 📉 Courbe d'Évolution des Streams")
-            all_artists = ["Global (Tous)"] + sorted(df_new['Artist'].unique().tolist())
-            sel_curve = st.selectbox("Visualiser la courbe pour :", all_artists)
-            
-            curve_data = []
-            for df in hist_sorted:
-                date_obj = safe_parse_date(df['Date_Fetch'].iloc[0])
-                val = df['Streams'].sum() if sel_curve == "Global (Tous)" else df[df['Artist'] == sel_curve]['Streams'].sum()
-                curve_data.append({'Date': date_obj.strftime('%Y-%m-%d'), 'Total Streams': val})
-            
-            df_curve = pd.DataFrame(curve_data)
-            fig_line = px.line(df_curve, x='Date', y='Total Streams', markers=True, template="plotly_dark", color_discrete_sequence=['#1DB954'])
-            fig_line.update_traces(line_width=3, marker_size=10, hovertemplate="<b>Date:</b> %{x}<br><b>Streams:</b> %{y:,}<extra></extra>")
-            fig_line.update_layout(xaxis_title="Date", yaxis_title="Streams", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-            st.plotly_chart(fig_line, use_container_width=True)
-
-            st.divider()
-            st.markdown(f"#### 🚀 Top 10 des Meilleures Progressions")
-            fig_p = px.bar(df_comp.sort_values('Evolution', ascending=False).head(10), x='Evolution', y='Track', orientation='h', template="plotly_dark", color='Evolution', color_continuous_scale='Viridis', text=df_comp.sort_values('Evolution', ascending=False).head(10)['Evolution'].apply(format_space))
-            fig_p.update_traces(hovertemplate="<b>%{y}</b><br>Gain : %{x:,}<extra></extra>")
-            fig_p.update_layout(yaxis={'categoryorder':'total ascending'}, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-            st.plotly_chart(fig_p, use_container_width=True)
-            
-            st.divider()
-            st.markdown("#### 📁 HISTORIQUE DES IMPORTS")
-            for i, df in enumerate(hist_sorted):
-                d_str = safe_parse_date(df['Date_Fetch'].iloc[0]).strftime('%Y-%m-%d')
-                st.write(f"📁 Import #{i+1} : **{d_str}** — {format_space(df['Streams'].sum())} streams total")
-        except Exception as e:
-            st.error(f"Erreur d'analyse : {e}")
-    else:
-        st.warning("Importe au moins deux fichiers CSV avec des dates valides dans le nom.")
+        all_h = pd.concat(st.session_state['history'])
+        st.download_button("📦 Sauvegarder l'Historique Global", all_h.to_csv(index=False).encode('utf-8'), "archive.csv")
+        fig = px.line(pd.DataFrame([{'Date': d, 'Streams': dfh['Streams'].sum()} for dfh in st.session_state['history'] for d in dfh['Date_Fetch'].unique()]), x='Date', y='Streams', markers=True, template="plotly_dark")
+        st.plotly_chart(fig, use_container_width=True)
